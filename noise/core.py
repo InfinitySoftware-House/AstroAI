@@ -36,6 +36,8 @@ except ImportError:
 Image.MAX_IMAGE_PIXELS = None
 
 
+from .arch_lite import LITE_ARCH, build_lite_model, build_lite_model_from_checkpoint
+
 MODEL_ARCH = "astro_unet_v4"
 ProgressCallback = Callable[[float, str], None]
 PatchPredictor = Callable[[np.ndarray], np.ndarray]
@@ -734,99 +736,6 @@ def add_astronomical_corruption(
                 noisy[..., ch][mask] = np.maximum(noisy[..., ch][mask], boost)
 
     return np.clip(noisy, 0.0, 1.0).astype(np.float32)
-
-
-def add_blur_degradation(
-    clean: np.ndarray,
-    rng: np.random.Generator,
-    blur_sigma_range: Tuple[float, float] = (0.7, 2.2),
-    noise_sigma_range: Tuple[float, float] = (0.0, 0.01),
-    anisotropy: float = 0.35,
-) -> np.ndarray:
-    """Degrade a sharp image into a soft/blurred input for a deconvolution model.
-
-    Models an optical/atmospheric PSF: a (mildly anisotropic) Gaussian blur applied
-    spatially per channel, plus a touch of additive noise so the model learns to
-    sharpen without amplifying grain. Target stays the original sharp image.
-    """
-    from scipy.ndimage import gaussian_filter
-
-    img = clean.astype(np.float32)
-    base = float(rng.uniform(*blur_sigma_range))
-    # Slight per-axis variation so stars aren't always perfectly symmetric.
-    sx = base * float(rng.uniform(1.0 - anisotropy, 1.0 + anisotropy))
-    sy = base * float(rng.uniform(1.0 - anisotropy, 1.0 + anisotropy))
-    if img.ndim == 3:
-        blurred = gaussian_filter(img, sigma=(sy, sx, 0.0), mode="reflect")
-    else:
-        blurred = gaussian_filter(img, sigma=(sy, sx), mode="reflect")
-
-    noise_sigma = float(rng.uniform(*noise_sigma_range))
-    if noise_sigma > 0:
-        blurred = blurred + rng.normal(0.0, noise_sigma, size=blurred.shape).astype(np.float32)
-
-    return np.clip(blurred, 0.0, 1.0).astype(np.float32)
-
-
-class DegradationDataset(Dataset):
-    """Self-supervised pairs: target = sharp source image, input = on-the-fly degradation.
-
-    Reads sharp reference images from ``root_dir/HR`` (or ``root_dir`` directly) and
-    synthesizes the degraded input each __getitem__, so every epoch sees fresh blur/noise.
-    Used for the sharpen/deconvolution task (no paired LR folder required).
-    """
-
-    def __init__(
-        self,
-        root_dir: Path,
-        augment: bool = False,
-        blur_sigma_range: Tuple[float, float] = (0.7, 2.2),
-        noise_sigma_range: Tuple[float, float] = (0.0, 0.01),
-        seed: int = 42,
-        deterministic: bool = False,
-    ) -> None:
-        src_dir = root_dir / "HR"
-        if not src_dir.exists():
-            src_dir = root_dir
-        if not src_dir.exists():
-            raise FileNotFoundError(f"Source image folder not found: {src_dir}")
-        self.src_dir = src_dir
-        self.augment = augment
-        self.blur_sigma_range = blur_sigma_range
-        self.noise_sigma_range = noise_sigma_range
-        self.seed = seed
-        # deterministic=True -> each image always degraded the same way (stable val metrics).
-        self.deterministic = deterministic
-        self.rng = np.random.default_rng(seed)
-
-        files = sorted([p for p in src_dir.iterdir() if p.is_file()])
-        self.images: List[Path] = []
-        for path in files:
-            try:
-                img, _ = read_image(path)
-            except Exception:
-                continue
-            self.images.append(path)
-        if not self.images:
-            raise RuntimeError(f"No readable images found in {src_dir}.")
-        first, _ = read_image(self.images[0])
-        self.channels = int(first.shape[2])
-        self.pairs = self.images  # alias so train()'s subset-by-index code works uniformly
-
-    def __len__(self) -> int:
-        return len(self.images)
-
-    def __getitem__(self, idx: int) -> Tuple["torch.Tensor", "torch.Tensor"]:
-        clean, _ = read_image(self.images[idx])
-        clean = clean.astype(np.float32)
-        if clean.shape[2] != self.channels:
-            clean = adapt_channels_for_model(np.transpose(clean, (2, 0, 1)), self.channels)
-            clean = np.transpose(clean, (1, 2, 0))
-        rng = np.random.default_rng(self.seed + idx) if self.deterministic else self.rng
-        blurred = add_blur_degradation(clean, rng, self.blur_sigma_range, self.noise_sigma_range)
-        if self.augment:
-            blurred, clean = apply_pair_augmentation(blurred, clean, rng)
-        return to_tensor_chw(blurred), to_tensor_chw(clean)
 
 
 class ImagePairsDataset(Dataset):
@@ -1716,6 +1625,8 @@ def encoder_blocks_from_args(args: argparse.Namespace) -> Tuple[int, ...]:
 
 
 def build_model(args: argparse.Namespace, channels: int) -> nn.Module:
+    if str(getattr(args, "arch", "full")) == "lite":
+        return build_lite_model(args, channels)
     return AstroUNet(
         channels=channels,
         width=args.width,
@@ -1729,7 +1640,9 @@ def build_model(args: argparse.Namespace, channels: int) -> nn.Module:
 def build_model_from_checkpoint(ckpt: Dict[str, object], device: "torch.device") -> nn.Module:
     channels = int(ckpt["channels"])
     arch = str(ckpt.get("arch", "dncnn"))
-    if arch == MODEL_ARCH:
+    if arch == LITE_ARCH:
+        model = build_lite_model_from_checkpoint(ckpt, device)
+    elif arch == MODEL_ARCH:
         stored_blocks = ckpt.get("encoder_blocks")
         if stored_blocks:
             encoder_blocks = tuple(int(b) for b in stored_blocks)  # type: ignore[arg-type]
@@ -1814,14 +1727,7 @@ def train(args: argparse.Namespace) -> None:
     require_torch()
     seed_everything(args.seed)
 
-    task = str(getattr(args, "task", "denoise"))
-    blur_range = (float(getattr(args, "blur_sigma_min", 0.7)), float(getattr(args, "blur_sigma_max", 2.2)))
-    degrade_noise = (0.0, float(getattr(args, "degrade_noise", 0.01)))
-
-    if task == "sharpen":
-        base_dataset = DegradationDataset(args.data_dir, augment=False, seed=args.seed)
-    else:
-        base_dataset = ImagePairsDataset(args.data_dir, augment=False, synth_mix_prob=0.0, seed=args.seed)
+    base_dataset = ImagePairsDataset(args.data_dir, augment=False, synth_mix_prob=0.0, seed=args.seed)
     channels = base_dataset.channels
     total_items = len(base_dataset)
     val_items = max(1, int(round(total_items * args.val_split))) if total_items > 1 else 0
@@ -1832,22 +1738,12 @@ def train(args: argparse.Namespace) -> None:
     if val_items > 0:
         generator = torch.Generator().manual_seed(args.seed)
         train_subset, val_subset = random_split(base_dataset, [train_items, val_items], generator=generator)
-        if task == "sharpen":
-            train_dataset = DegradationDataset(args.data_dir, augment=True, blur_sigma_range=blur_range, noise_sigma_range=degrade_noise, seed=args.seed)
-            val_dataset = DegradationDataset(args.data_dir, augment=False, blur_sigma_range=blur_range, noise_sigma_range=degrade_noise, seed=args.seed + 1, deterministic=True)
-        else:
-            train_dataset = ImagePairsDataset(args.data_dir, augment=True, synth_mix_prob=args.synth_mix_prob, seed=args.seed)
-            val_dataset = ImagePairsDataset(args.data_dir, augment=False, synth_mix_prob=0.0, seed=args.seed + 1)
+        train_dataset = ImagePairsDataset(args.data_dir, augment=True, synth_mix_prob=args.synth_mix_prob, seed=args.seed)
+        val_dataset = ImagePairsDataset(args.data_dir, augment=False, synth_mix_prob=0.0, seed=args.seed + 1)
         train_dataset.pairs = [base_dataset.pairs[i] for i in train_subset.indices]
         val_dataset.pairs = [base_dataset.pairs[i] for i in val_subset.indices]
-        if task == "sharpen":
-            train_dataset.images = train_dataset.pairs
-            val_dataset.images = val_dataset.pairs
     else:
-        if task == "sharpen":
-            train_dataset = DegradationDataset(args.data_dir, augment=True, blur_sigma_range=blur_range, noise_sigma_range=degrade_noise, seed=args.seed)
-        else:
-            train_dataset = ImagePairsDataset(args.data_dir, augment=True, synth_mix_prob=args.synth_mix_prob, seed=args.seed)
+        train_dataset = ImagePairsDataset(args.data_dir, augment=True, synth_mix_prob=args.synth_mix_prob, seed=args.seed)
         val_dataset = None
 
     device = resolve_device(args.device)
@@ -1885,6 +1781,7 @@ def train(args: argparse.Namespace) -> None:
             )
         model = build_model_from_checkpoint(resume_ckpt, device)
         model.load_state_dict(resume_ckpt["model_state"])
+        args.arch = "lite" if str(resume_ckpt.get("arch", MODEL_ARCH)) == LITE_ARCH else "full"
         args.width = int(resume_ckpt.get("width", args.width))
         args.enc_blocks = int(resume_ckpt.get("enc_blocks", args.enc_blocks))
         args.num_levels = int(resume_ckpt.get("num_levels", getattr(args, "num_levels", 4)))
@@ -1938,7 +1835,7 @@ def train(args: argparse.Namespace) -> None:
 
     print(f"Training on device: {device}")
     print(f"Pairs: {len(base_dataset)} | Train: {len(train_dataset)} | Val: {len(val_dataset) if val_dataset is not None else 0}")
-    print(f"Channels: {channels} | Architecture: {MODEL_ARCH} | Task: {task}")
+    print(f"Channels: {channels} | Architecture: {MODEL_ARCH}")
     if resume_ckpt is not None:
         restored_parts: List[str] = ["model"]
         if args.reset_optimizer:
@@ -2043,8 +1940,7 @@ def train(args: argparse.Namespace) -> None:
             "scheduler_state": scheduler.state_dict(),
             "scaler_state": scaler.state_dict(),
             "channels": channels,
-            "arch": MODEL_ARCH,
-            "task": task,
+            "arch": LITE_ARCH if str(getattr(args, "arch", "full")) == "lite" else MODEL_ARCH,
             "width": args.width,
             "enc_blocks": args.enc_blocks,
             "num_levels": int(getattr(args, "num_levels", 4)),

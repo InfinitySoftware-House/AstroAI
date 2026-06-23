@@ -5,12 +5,10 @@ from pathlib import Path
 from typing import Sequence
 
 from .core import denoise_image_file, write_image
-from .star_reducer import run_star_reducer_inference
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Run image inference with a trained DeepSkyDenoiser model.")
-    parser.add_argument("--mode", choices=["denoise", "star", "sharpen"], default="denoise")
+    parser = argparse.ArgumentParser(description="Run image denoising with a trained DeepSkyDenoiser model.")
     parser.add_argument("--model-path", type=Path, required=True)
     parser.add_argument("--input", type=Path, required=True)
     parser.add_argument("--output", type=Path, required=True)
@@ -87,72 +85,31 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: Sequence[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
-    if args.mode == "star":
-        _, denoised, meta = run_star_reducer_inference(
-            model_path=args.model_path,
-            input_path=args.input,
-            patch_size=args.patch_size,
-            stride=args.stride,
-            tta=args.tta,
-            amp=args.amp,
-            batch_size=args.batch_size,
-            strength=args.strength,
-            device_name=args.device,
-        )
-        output_label = "Star-reduced image"
-    elif args.mode == "sharpen":
-        # Deconvolution model: disable denoise-oriented blends so the sharpened output
-        # isn't diluted by the soft original. Keep highlight protection for star cores.
-        _, denoised, meta = denoise_image_file(
-            model_path=args.model_path,
-            input_path=args.input,
-            patch_size=args.patch_size,
-            stride=args.stride,
-            tta=args.tta,
-            amp=args.amp,
-            batch_size=args.batch_size,
-            strength=args.strength,
-            detail_preservation=0.0,
-            background_threshold=0.0,
-            background_strength=1.0,
-            subject_detail_preservation=0.0,
-            background_detail_preservation=0.0,
-            faint_structure_protection=0.0,
-            faint_signal_preservation=0.0,
-            faint_signal_boost=0.0,
-            sharpen=0.0,
-            noise_floor=0.0,
-            highlight_protection=0.9,
-            device_name=args.device,
-        )
-        output_label = "Sharpened image"
-    else:
-        _, denoised, meta = denoise_image_file(
-            model_path=args.model_path,
-            input_path=args.input,
-            patch_size=args.patch_size,
-            stride=args.stride,
-            tta=args.tta,
-            amp=args.amp,
-            batch_size=args.batch_size,
-            strength=args.strength,
-            detail_preservation=args.detail_preservation,
-            background_threshold=args.background_threshold,
-            background_strength=args.background_strength,
-            subject_detail_preservation=args.subject_detail_preservation,
-            background_detail_preservation=args.background_detail_preservation,
-            faint_structure_protection=args.faint_structure_protection,
-            faint_signal_preservation=args.faint_signal_preservation,
-            faint_signal_boost=args.faint_signal_boost,
-            sharpen=args.sharpen,
-            noise_floor=args.noise_floor,
-            highlight_protection=args.highlight_protection,
-            device_name=args.device,
-        )
-        output_label = "Denoised image"
+    _, denoised, meta = denoise_image_file(
+        model_path=args.model_path,
+        input_path=args.input,
+        patch_size=args.patch_size,
+        stride=args.stride,
+        tta=args.tta,
+        amp=args.amp,
+        batch_size=args.batch_size,
+        strength=args.strength,
+        detail_preservation=args.detail_preservation,
+        background_threshold=args.background_threshold,
+        background_strength=args.background_strength,
+        subject_detail_preservation=args.subject_detail_preservation,
+        background_detail_preservation=args.background_detail_preservation,
+        faint_structure_protection=args.faint_structure_protection,
+        faint_signal_preservation=args.faint_signal_preservation,
+        faint_signal_boost=args.faint_signal_boost,
+        sharpen=args.sharpen,
+        noise_floor=args.noise_floor,
+        highlight_protection=args.highlight_protection,
+        device_name=args.device,
+    )
     args.output.parent.mkdir(parents=True, exist_ok=True)
     write_image(args.output, denoised, meta)
-    print(f"{output_label} saved to: {args.output}")
+    print(f"Denoised image saved to: {args.output}")
 
 
 if __name__ == "__main__":

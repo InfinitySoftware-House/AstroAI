@@ -12,9 +12,7 @@ from typing import Callable
 import numpy as np
 from PIL import Image
 
-from gradient.inference import run_gradient_inference
 from noise.core import denoise_image_file, read_image, write_image
-from noise.star_reducer import run_star_reducer_inference
 
 
 def emit_progress(value: float, message: str, request_id: str | None = None) -> None:
@@ -50,43 +48,21 @@ def image_to_base64_png(image: Image.Image) -> str:
     return base64.b64encode(buffer.getvalue()).decode("ascii")
 
 
-def build_default_output(input_path: Path, mode: str = "denoise") -> Path:
+def build_default_output(input_path: Path) -> Path:
     suffix = input_path.suffix if input_path.suffix else ".tif"
-    if mode == "gradient":
-        suffix_tag = "_gradient_removed"
-    elif mode == "star":
-        suffix_tag = "_stars_reduced"
-    else:
-        suffix_tag = "_denoised"
-    return input_path.with_name(f"{input_path.stem}{suffix_tag}{suffix}")
+    return input_path.with_name(f"{input_path.stem}_denoised{suffix}")
 
 
-def find_default_model(mode: str = "denoise") -> Path | None:
-    candidates = list_models(mode)
+def find_default_model() -> Path | None:
+    candidates = list_models()
     if not candidates:
         return None
     return candidates[0]
 
 
-def list_models(mode: str = "denoise") -> list[Path]:
+def list_models() -> list[Path]:
     models_dir = Path("models")
     candidates = list(models_dir.glob("*.pt")) + list(models_dir.glob("*.pth")) + list(models_dir.glob("*.onnx"))
-    if mode == "gradient":
-        candidates = [path for path in candidates if "gradient" in path.stem.lower()]
-    elif mode == "star":
-        candidates = [path for path in candidates if "star" in path.stem.lower() or "seeing" in path.stem.lower()]
-    elif mode == "sharpen":
-        candidates = [path for path in candidates if "sharpen" in path.stem.lower() or "sharp" in path.stem.lower()]
-    else:
-        candidates = [
-            path
-            for path in candidates
-            if "gradient" not in path.stem.lower()
-            and "star" not in path.stem.lower()
-            and "seeing" not in path.stem.lower()
-            and "sharpen" not in path.stem.lower()
-            and "sharp" not in path.stem.lower()
-        ]
     suffix_rank = {
         ".pt": 0,
         ".pth": 1,
@@ -96,12 +72,12 @@ def list_models(mode: str = "denoise") -> list[Path]:
 
 
 def command_get_default_model(args: argparse.Namespace) -> dict[str, object]:
-    model = find_default_model(args.mode)
+    model = find_default_model()
     return {"model_path": str(model) if model else ""}
 
 
 def command_list_models(args: argparse.Namespace) -> dict[str, object]:
-    models = list_models(args.mode)
+    models = list_models()
     return {
         "models": [
             {
@@ -123,85 +99,24 @@ def command_denoise(
     args: argparse.Namespace,
     progress_callback: Callable[[float, str], None] = lambda value, message: emit_progress(value, message),
 ) -> dict[str, object]:
-    output_path = args.output if args.output else build_default_output(args.input, args.mode)
-    if args.mode == "gradient":
-        original_hwc, denoised_chw, meta = run_gradient_inference(
-            model_path=args.model_path,
-            input_path=args.input,
-            patch_size=args.patch_size,
-            stride=args.stride,
-            tta=args.tta,
-            amp=args.amp,
-            batch_size=args.batch_size,
-            strength=args.strength,
-            detail_preservation=args.detail_preservation,
-            background_threshold=args.background_threshold,
-            background_strength=args.background_strength,
-            subject_detail_preservation=args.subject_detail_preservation,
-            background_detail_preservation=args.background_detail_preservation,
-            gradient_blur_sigma=getattr(args, "gradient_blur_sigma", 3.0),
-            device_name=args.device,
-            progress_callback=progress_callback,
-        )
-    elif args.mode == "star":
-        original_hwc, denoised_chw, meta = run_star_reducer_inference(
-            model_path=args.model_path,
-            input_path=args.input,
-            patch_size=args.patch_size,
-            stride=args.stride,
-            tta=args.tta,
-            amp=args.amp,
-            batch_size=args.batch_size,
-            strength=args.strength,
-            device_name=args.device,
-            progress_callback=progress_callback,
-        )
-    elif args.mode == "sharpen":
-        # Deconvolution model: the network IS the enhancement. Disable denoise-oriented
-        # blends that would dilute the sharpened result (detail-preservation re-mixes the
-        # soft original; faint-signal/background cleanup don't apply). Keep highlight
-        # protection on to guard star cores from ringing.
-        original_hwc, denoised_chw, meta = denoise_image_file(
-            model_path=args.model_path,
-            input_path=args.input,
-            patch_size=args.patch_size,
-            stride=args.stride,
-            tta=args.tta,
-            amp=args.amp,
-            batch_size=args.batch_size,
-            strength=args.strength,
-            detail_preservation=0.0,
-            background_threshold=0.0,
-            background_strength=1.0,
-            subject_detail_preservation=0.0,
-            background_detail_preservation=0.0,
-            faint_structure_protection=0.0,
-            faint_signal_preservation=0.0,
-            faint_signal_boost=0.0,
-            sharpen=0.0,
-            noise_floor=0.0,
-            highlight_protection=0.9,
-            device_name=args.device,
-            progress_callback=progress_callback,
-        )
-    else:
-        original_hwc, denoised_chw, meta = denoise_image_file(
-            model_path=args.model_path,
-            input_path=args.input,
-            patch_size=args.patch_size,
-            stride=args.stride,
-            tta=args.tta,
-            amp=args.amp,
-            batch_size=args.batch_size,
-            strength=args.strength,
-            detail_preservation=args.detail_preservation,
-            background_threshold=args.background_threshold,
-            background_strength=args.background_strength,
-            subject_detail_preservation=args.subject_detail_preservation,
-            background_detail_preservation=args.background_detail_preservation,
-            device_name=args.device,
-            progress_callback=progress_callback,
-        )
+    output_path = args.output if args.output else build_default_output(args.input)
+    original_hwc, denoised_chw, meta = denoise_image_file(
+        model_path=args.model_path,
+        input_path=args.input,
+        patch_size=args.patch_size,
+        stride=args.stride,
+        tta=args.tta,
+        amp=args.amp,
+        batch_size=args.batch_size,
+        strength=args.strength,
+        detail_preservation=args.detail_preservation,
+        background_threshold=args.background_threshold,
+        background_strength=args.background_strength,
+        subject_detail_preservation=args.subject_detail_preservation,
+        background_detail_preservation=args.background_detail_preservation,
+        device_name=args.device,
+        progress_callback=progress_callback,
+    )
     progress_callback(0.97, "Writing output file")
     output_path.parent.mkdir(parents=True, exist_ok=True)
     write_image(output_path, denoised_chw, meta)
@@ -230,7 +145,6 @@ def run_denoise_worker() -> None:
                 model_path=Path(request["model_path"]),
                 input=Path(request["input"]),
                 output=Path(request["output"]),
-                mode=str(request.get("mode", "denoise")),
                 patch_size=int(request.get("patch_size", 128)),
                 stride=int(request.get("stride", 64)),
                 tta=int(request.get("tta", 4)),
@@ -242,7 +156,6 @@ def run_denoise_worker() -> None:
                 background_strength=float(request.get("background_strength", 1.2)),
                 subject_detail_preservation=float(request.get("subject_detail_preservation", 0.2)),
                 background_detail_preservation=float(request.get("background_detail_preservation", 0.05)),
-                gradient_blur_sigma=float(request.get("gradient_blur_sigma", 3.0)),
                 device=str(request.get("device", "")),
             )
             result = command_denoise(
@@ -261,11 +174,9 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     p_default = subparsers.add_parser("get-default-model")
-    p_default.add_argument("--mode", choices=["denoise", "gradient", "star", "sharpen"], default="denoise")
     p_default.set_defaults(func=command_get_default_model)
 
     p_models = subparsers.add_parser("list-models")
-    p_models.add_argument("--mode", choices=["denoise", "gradient", "star", "sharpen"], default="denoise")
     p_models.set_defaults(func=command_list_models)
 
     p_preview = subparsers.add_parser("preview")
@@ -276,7 +187,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_denoise.add_argument("--model-path", type=Path, required=True)
     p_denoise.add_argument("--input", type=Path, required=True)
     p_denoise.add_argument("--output", type=Path, required=True)
-    p_denoise.add_argument("--mode", choices=["denoise", "gradient", "star", "sharpen"], default="denoise")
     p_denoise.add_argument("--patch-size", type=int, default=128)
     p_denoise.add_argument("--stride", type=int, default=64)
     p_denoise.add_argument("--tta", type=int, default=4)
@@ -288,7 +198,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_denoise.add_argument("--background-strength", type=float, default=1.2)
     p_denoise.add_argument("--subject-detail-preservation", type=float, default=0.2)
     p_denoise.add_argument("--background-detail-preservation", type=float, default=0.05)
-    p_denoise.add_argument("--gradient-blur-sigma", type=float, default=3.0)
     p_denoise.add_argument("--device", type=str, default="")
     p_denoise.set_defaults(func=command_denoise)
 

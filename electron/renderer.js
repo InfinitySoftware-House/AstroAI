@@ -1,5 +1,4 @@
 const elements = {
-  modeSelect: document.getElementById("modeSelect"),
   appSubtitle: document.getElementById("appSubtitle"),
   resultLabel: document.getElementById("resultLabel"),
   outputTooltipText: document.getElementById("outputTooltipText"),
@@ -17,9 +16,6 @@ const elements = {
   backgroundStrength: document.getElementById("backgroundStrength"),
   subjectDetailPreservation: document.getElementById("subjectDetailPreservation"),
   backgroundDetailPreservation: document.getElementById("backgroundDetailPreservation"),
-  gradientBlurSigma: document.getElementById("gradientBlurSigma"),
-  gradientBlurSigmaValue: document.getElementById("gradientBlurSigmaValue"),
-  gradientOnlySettings: document.getElementById("gradientOnlySettings"),
   amp: document.getElementById("amp"),
   pickInput: document.getElementById("pickInput"),
   pickOutput: document.getElementById("pickOutput"),
@@ -50,7 +46,6 @@ const state = {
   hasResult: false,
   lastSavedOutputPath: "",
   modelPath: "",
-  mode: "denoise",
   modelVariant: "standard",
   allModels: [],
   sliderPct: 50
@@ -159,40 +154,7 @@ function setStatus(message) {
   elements.statusText.textContent = message;
 }
 
-function getModeCopy(mode = state.mode) {
-  if (mode === "gradient") {
-    return {
-      noun: "gradient removal",
-      verb: "gradient correction",
-      resultLabel: "Corrected",
-      subtitle: "Load an image, remove background gradients, and save the corrected result.",
-      outputTooltip: "Where the gradient-corrected image will be saved. A default name is created automatically from the input file.",
-      strengthTooltip: "Controls how strongly the result moves toward the gradient-corrected version. Lower keeps more of the original background trend, higher removes more.",
-      readyStatus: "Choose a gradient-removal model and an image, then run correction."
-    };
-  }
-  if (mode === "star") {
-    return {
-      noun: "star reduction",
-      verb: "star reduction",
-      resultLabel: "Stars Reduced",
-      subtitle: "Load an image, reduce bloated stars, and save the corrected result.",
-      outputTooltip: "Where the star-reduced image will be saved. A default name is created automatically from the input file.",
-      strengthTooltip: "Controls how strongly the result moves toward the star-reduced version. Lower keeps more of the original star size, higher reduces stars more.",
-      readyStatus: "Choose a star-reducer model and an image, then run star reduction."
-    };
-  }
-  if (mode === "sharpen") {
-    return {
-      noun: "sharpening",
-      verb: "sharpening",
-      resultLabel: "Sharpened",
-      subtitle: "Load an image, recover fine detail and tighten stars, and save the result.",
-      outputTooltip: "Where the sharpened image will be saved. A default name is created automatically from the input file.",
-      strengthTooltip: "Controls how strongly the result moves toward the sharpened version. Lower keeps the image softer, higher recovers more detail.",
-      readyStatus: "Choose a sharpen model and an image, then run sharpening."
-    };
-  }
+function getModeCopy() {
   return {
     noun: "denoising",
     verb: "denoising",
@@ -253,7 +215,6 @@ function setBusy(busy) {
     elements.subjectDetailPreservation,
     elements.backgroundDetailPreservation,
     elements.amp,
-    elements.modeSelect,
     elements.pickInput,
     elements.pickOutput,
     ...elements.quickPresetButtons,
@@ -291,48 +252,7 @@ function applyModeCopy() {
   elements.resultLabel.textContent = copy.resultLabel;
   elements.outputTooltipText.textContent = copy.outputTooltip;
   elements.strengthTooltipText.textContent = copy.strengthTooltip;
-  elements.runDenoise.textContent = state.mode === "gradient" ? "Run Gradient Removal" : state.mode === "star" ? "Run Star Reducer" : state.mode === "sharpen" ? "Run Sharpen" : "Run";
-  elements.gradientOnlySettings?.classList.toggle("hidden", state.mode !== "gradient");
-  elements.strength.max = state.mode === "star" ? "3" : "1.5";
-  if (Number(elements.strength.value) > Number(elements.strength.max)) {
-    elements.strength.value = elements.strength.max;
-  }
-  updateRangeLabels();
-}
-
-function applyModeDefaults() {
-  // Shared tiling defaults.
-  elements.patchSize.value = "128";
-  elements.stride.value = "64";
-  elements.batchSize.value = "32";
-
-  if (state.mode === "star") {
-    elements.tta.value = "1";
-    elements.strength.value = "1.5";
-    elements.detailPreservation.value = "0";
-    elements.backgroundThreshold.value = "0.12";
-    elements.backgroundStrength.value = "1";
-    elements.subjectDetailPreservation.value = "0";
-    elements.backgroundDetailPreservation.value = "0";
-  } else if (state.mode === "sharpen") {
-    // The model IS the enhancement: no soft-original blend-back, no background cleanup.
-    elements.tta.value = "4";
-    elements.strength.value = "1";
-    elements.detailPreservation.value = "0";
-    elements.backgroundThreshold.value = "0";
-    elements.backgroundStrength.value = "1";
-    elements.subjectDetailPreservation.value = "0";
-    elements.backgroundDetailPreservation.value = "0";
-  } else {
-    // denoise: restore the standard HTML defaults.
-    elements.tta.value = "1";
-    elements.strength.value = "1";
-    elements.detailPreservation.value = "0.2";
-    elements.backgroundThreshold.value = "0.12";
-    elements.backgroundStrength.value = "1.20";
-    elements.subjectDetailPreservation.value = "0.20";
-    elements.backgroundDetailPreservation.value = "0.05";
-  }
+  elements.runDenoise.textContent = "Run";
   updateRangeLabels();
 }
 
@@ -343,9 +263,6 @@ function updateRangeLabels() {
   document.getElementById("backgroundStrengthValue").textContent = Number(elements.backgroundStrength.value).toFixed(2);
   document.getElementById("subjectDetailValue").textContent = Number(elements.subjectDetailPreservation.value).toFixed(2);
   document.getElementById("backgroundDetailValue").textContent = Number(elements.backgroundDetailPreservation.value).toFixed(2);
-  if (elements.gradientBlurSigma && elements.gradientBlurSigmaValue) {
-    elements.gradientBlurSigmaValue.textContent = Number(elements.gradientBlurSigma.value).toFixed(1);
-  }
 }
 
 // ─── Comparison slider ────────────────────────────────────────────────────────
@@ -557,7 +474,6 @@ function renderModelOptions(models, selectedPath = "") {
 
 function collectPayload() {
   return {
-    mode: state.mode,
     modelPath: state.modelPath,
     inputPath: elements.inputPath.value.trim(),
     outputPath: elements.outputPath.value.trim(),
@@ -572,7 +488,6 @@ function collectPayload() {
     backgroundStrength: Number(elements.backgroundStrength.value),
     subjectDetailPreservation: Number(elements.subjectDetailPreservation.value),
     backgroundDetailPreservation: Number(elements.backgroundDetailPreservation.value),
-    gradientBlurSigma: elements.gradientBlurSigma ? Number(elements.gradientBlurSigma.value) : 3.0,
     device: elements.device.value.trim()
   };
 }
@@ -619,7 +534,7 @@ elements.pickInput.addEventListener("click", async () => {
     return;
   }
   elements.inputPath.value = file;
-  elements.outputPath.value = await window.noiseApi.buildDefaultOutput(file, state.mode);
+  elements.outputPath.value = await window.noiseApi.buildDefaultOutput(file);
   clearDenoisedState();
   setStatus("Loading preview...");
   try {
@@ -744,7 +659,6 @@ elements.backgroundThreshold.addEventListener("input", updateRangeLabels);
 elements.backgroundStrength.addEventListener("input", updateRangeLabels);
 elements.subjectDetailPreservation.addEventListener("input", updateRangeLabels);
 elements.backgroundDetailPreservation.addEventListener("input", updateRangeLabels);
-elements.gradientBlurSigma?.addEventListener("input", updateRangeLabels);
 elements.device.addEventListener("input", updateBackendBadge);
 elements.modelSelect.addEventListener("change", () => {
   state.modelPath = elements.modelSelect.value;
@@ -754,38 +668,6 @@ elements.modelSelect.addEventListener("change", () => {
     setStatus(
       `Model selected: ${elements.modelSelect.options[elements.modelSelect.selectedIndex]?.text || elements.modelSelect.value} (${backend}). PyTorch checkpoints are currently the fastest option in this app.`
     );
-  }
-});
-
-elements.modeSelect.addEventListener("change", async () => {
-  state.mode = elements.modeSelect.value || "denoise";
-  applyModeCopy();
-  applyModeDefaults();
-  clearDenoisedState();
-  if (elements.inputPath.value.trim()) {
-    elements.outputPath.value = await window.noiseApi.buildDefaultOutput(elements.inputPath.value.trim(), state.mode);
-  }
-  try {
-    const [modelsResult, defaultResult] = await Promise.all([
-      window.noiseApi.listModels(state.mode),
-      window.noiseApi.getDefaultModel(state.mode)
-    ]);
-    const models = Array.isArray(modelsResult.models) ? modelsResult.models : [];
-    state.allModels = models;
-    const filtered = filterModelsByVariant(models, state.modelVariant);
-    renderModelOptions(filtered, defaultResult.model_path || "");
-    if (state.modelPath) {
-      setStatus(`${getModeCopy().resultLabel} mode ready. Choose an image or run with the selected model.`);
-    } else if (filtered.length === 0 && state.modelVariant === "lite") {
-      setStatus("No Lite model found. Train one with: python train_lite.py");
-    } else {
-      setStatus(`No ${state.mode === "gradient" ? "gradient-removal" : state.mode === "star" ? "star-reducer" : "denoising"} models were found in the models folder.`);
-    }
-  } catch (error) {
-    state.modelPath = "";
-    state.allModels = [];
-    renderModelOptions([], "");
-    setStatus(`Unable to load models for ${state.mode}: ${error.message}`);
   }
 });
 
@@ -902,8 +784,8 @@ window.addEventListener("DOMContentLoaded", async () => {
 
   try {
     const [modelsResult, defaultResult] = await Promise.all([
-      window.noiseApi.listModels(state.mode),
-      window.noiseApi.getDefaultModel(state.mode)
+      window.noiseApi.listModels(),
+      window.noiseApi.getDefaultModel()
     ]);
     const models = Array.isArray(modelsResult.models) ? modelsResult.models : [];
     state.allModels = models;

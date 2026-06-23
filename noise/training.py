@@ -11,19 +11,17 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Train the DeepSkyDenoiser from paired image patches.")
     parser.add_argument("--data-dir", type=Path, default=Path("dataset/image_pairs"))
     parser.add_argument("--model-path", type=Path, default=Path("models/astro_denoiser.pt"))
-    parser.add_argument(
-        "--task",
-        choices=["denoise", "sharpen"],
-        default="denoise",
-        help="denoise: learn LR->HR pairs. sharpen: deconvolution, input=blur(HR) synthesized on the fly, target=HR.",
-    )
-    parser.add_argument("--blur-sigma-min", type=float, default=0.7, help="[sharpen] min Gaussian PSF sigma.")
-    parser.add_argument("--blur-sigma-max", type=float, default=2.2, help="[sharpen] max Gaussian PSF sigma.")
-    parser.add_argument("--degrade-noise", type=float, default=0.01, help="[sharpen] max additive noise sigma on degraded input.")
     parser.add_argument("--epochs", type=int, default=200)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--lr", type=float, default=3e-4)
     parser.add_argument("--weight-decay", type=float, default=1e-4)
+    parser.add_argument(
+        "--arch",
+        choices=["full", "lite"],
+        default="full",
+        help="full: AstroUNet v4 (heavy, best quality). lite: AstroUNetLite (~4x fewer params, "
+             "2-3x faster CPU inference/training, 3 levels). Checkpoints record the arch used.",
+    )
     parser.add_argument("--width", type=int, default=32)
     parser.add_argument("--enc-blocks", type=int, default=2, help="Base encoder blocks (doubles each deeper level).")
     parser.add_argument("--num-levels", type=int, default=4, help="UNet depth (encoder/decoder levels).")

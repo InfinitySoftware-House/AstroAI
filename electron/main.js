@@ -32,30 +32,13 @@ function resolvePythonExecutable() {
   return candidates.find((candidate) => candidate === "python" || fs.existsSync(candidate));
 }
 
-function buildDefaultOutput(inputPath, mode = "denoise") {
+function buildDefaultOutput(inputPath) {
   if (!inputPath) {
     const outputDir = app.isPackaged ? app.getPath("documents") : ROOT_DIR;
-    if (mode === "gradient") {
-      return path.join(outputDir, "gradient_removed_output.tif");
-    }
-    if (mode === "star") {
-      return path.join(outputDir, "stars_reduced_output.tif");
-    }
-    if (mode === "sharpen") {
-      return path.join(outputDir, "sharpened_output.tif");
-    }
     return path.join(outputDir, "denoised_output.tif");
   }
   const parsed = path.parse(inputPath);
-  const suffix =
-    mode === "gradient"
-      ? "_gradient_removed"
-      : mode === "star"
-      ? "_stars_reduced"
-      : mode === "sharpen"
-      ? "_sharpened"
-      : "_denoised";
-  return path.join(parsed.dir, `${parsed.name}${suffix}${parsed.ext || ".tif"}`);
+  return path.join(parsed.dir, `${parsed.name}_denoised${parsed.ext || ".tif"}`);
 }
 
 function runBridge(args, options = {}) {
@@ -264,7 +247,6 @@ function runDenoiseViaWorker(payload, options = {}) {
 
       worker.child.stdin.write(`${JSON.stringify({
       id: requestId,
-      mode: payload.mode || "denoise",
       model_path: payload.modelPath,
       input: payload.inputPath,
       output: payload.outputPath,
@@ -279,7 +261,6 @@ function runDenoiseViaWorker(payload, options = {}) {
       background_strength: payload.backgroundStrength,
       subject_detail_preservation: payload.subjectDetailPreservation,
       background_detail_preservation: payload.backgroundDetailPreservation,
-      gradient_blur_sigma: payload.gradientBlurSigma !== undefined ? payload.gradientBlurSigma : 3.0,
       device: payload.device || ""
     })}\n`);
   });
@@ -334,13 +315,13 @@ app.whenReady().then(() => {
     return result.canceled ? "" : result.filePath;
   });
 
-  ipcMain.handle("path:default-output", async (_event, inputPath, mode) => buildDefaultOutput(inputPath, mode));
+  ipcMain.handle("path:default-output", async (_event, inputPath) => buildDefaultOutput(inputPath));
   ipcMain.handle("file:copy", async (_event, sourcePath, targetPath) => {
     await fs.promises.copyFile(sourcePath, targetPath);
     return { outputPath: targetPath };
   });
-  ipcMain.handle("backend:list-models", async (_event, mode) => runBridge(["list-models", "--mode", mode || "denoise"]));
-  ipcMain.handle("backend:get-default-model", async (_event, mode) => runBridge(["get-default-model", "--mode", mode || "denoise"]));
+  ipcMain.handle("backend:list-models", async () => runBridge(["list-models"]));
+  ipcMain.handle("backend:get-default-model", async () => runBridge(["get-default-model"]));
   ipcMain.handle("backend:load-preview", async (_event, inputPath) => runBridge(["preview", "--input", inputPath]));
   ipcMain.handle("backend:denoise", async (_event, payload) => {
     const jobKey = _event.sender.id;
@@ -351,33 +332,13 @@ app.whenReady().then(() => {
     activeDenoiseJobs.set(jobKey, jobState);
     let modelPath = payload.modelPath;
     if (!modelPath) {
-      const defaultModel = await runBridge(["get-default-model", "--mode", payload.mode || "denoise"]);
+      const defaultModel = await runBridge(["get-default-model"]);
       modelPath = defaultModel.model_path;
     }
     if (!modelPath) {
       throw new Error("No preloaded model was found.");
     }
     payload.modelPath = modelPath;
-    const args = [
-      "denoise",
-      "--model-path", modelPath,
-      "--input", payload.inputPath,
-      "--output", payload.outputPath,
-      "--patch-size", String(payload.patchSize),
-      "--stride", String(payload.stride),
-      "--tta", String(payload.tta),
-      "--batch-size", String(payload.batchSize),
-      "--strength", String(payload.strength),
-      "--detail-preservation", String(payload.detailPreservation),
-      "--background-threshold", String(payload.backgroundThreshold),
-      "--background-strength", String(payload.backgroundStrength),
-      "--subject-detail-preservation", String(payload.subjectDetailPreservation),
-      "--background-detail-preservation", String(payload.backgroundDetailPreservation),
-      "--device", payload.device || ""
-    ];
-    if (payload.amp) {
-      args.push("--amp");
-    }
     try {
       return await runDenoiseViaWorker(payload, {
         onProgress(progressPayload) {
