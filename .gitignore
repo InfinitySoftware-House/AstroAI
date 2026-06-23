@@ -1,0 +1,9 @@
+.venv311/
+__pycache__/
+*.pyc
+dist/
+node_modules/
+dataset/
+models/*.pt
+*.log
+.gradient/

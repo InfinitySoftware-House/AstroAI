@@ -1,0 +1,280 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="X-UA-Compatible" content="IE=edge" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>DeepSkyDenoiser</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <main class="content-grid">
+        <section class="controls card">
+          <div class="topbar">
+            <div class="topbar-row">
+              <div class="section-title">
+                <h1>
+                  <svg class="app-icon" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                    <path d="M10 2l1.8 5.4H17l-4.6 3.3 1.7 5.3L10 13l-4.1 3 1.7-5.3L3 7.4h5.2L10 2z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round" fill="rgba(83,167,255,0.18)"/>
+                  </svg>
+                  DeepSkyDenoiser
+                </h1>
+                <p id="appSubtitle">Load an image, keep the settings simple, and run.</p>
+              </div>
+              <label class="mode-chip" for="modeSelect">
+                <span class="model-chip-label">Mode</span>
+                <select id="modeSelect" aria-label="Select mode">
+                  <option value="denoise">Denoise</option>
+                  <option value="sharpen">Sharpen</option>
+                  <option value="star">Star reducer</option>
+                </select>
+              </label>
+            </div>
+            <label class="model-chip" for="modelSelect">
+              <div class="model-chip-header">
+                <span class="model-chip-label">Model</span>
+                <div class="variant-toggle" role="group" aria-label="Model variant">
+                  <button class="variant-btn is-active" id="variantStandard" type="button" data-variant="standard" aria-pressed="true">Standard</button>
+                  <button class="variant-btn" id="variantLite" type="button" data-variant="lite" aria-pressed="false">
+                    <svg class="variant-btn-icon" viewBox="0 0 12 14" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                      <path d="M7 1L1 8h5l-1 5 6-7H6l1-5z" stroke="currentColor" stroke-width="1.2" stroke-linejoin="round"/>
+                    </svg>
+                    Lite
+                  </button>
+                </div>
+              </div>
+              <select id="modelSelect" aria-label="Select model"></select>
+              <div id="backendBadge" class="backend-badge flex-column" aria-live="polite">
+                <span id="backendName" class="backend-name">Unknown</span>
+                <span id="backendDevice" class="backend-device">Auto</span>
+              </div>
+            </label>
+          </div>
+
+          <div class="controls-grid">
+          <section class="panel panel-files">
+            <div class="panel-head compact-head">
+              <h2>Files</h2>
+            </div>
+
+            <label class="field">
+              <span class="label-with-help">Input image
+                <span class="tooltip" tabindex="0">?
+                  <span class="tooltip-box">The source image you want to clean up. Loading it also refreshes the original preview.</span>
+                </span>
+              </span>
+              <div class="field-row">
+                <input id="inputPath" type="text" placeholder="Choose a source image" />
+                <button id="pickInput" class="button button-secondary" type="button">Browse</button>
+              </div>
+            </label>
+
+            <label class="field">
+              <span class="label-with-help">Output path
+                <span class="tooltip" tabindex="0">?
+                <span id="outputTooltipText" class="tooltip-box">Where the denoised image will be saved. A default name is created automatically from the input file.</span>
+                </span>
+              </span>
+              <div class="field-row">
+                <input id="outputPath" type="text" placeholder="Choose where to save the denoised file" />
+                <button id="pickOutput" class="button button-secondary" type="button">Save as</button>
+              </div>
+            </label>
+          </section>
+
+          <section class="panel">
+            <div class="panel-head compact-head">
+              <h2>Settings</h2>
+            </div>
+
+            <div class="two-up">
+              <label class="field">
+                <span class="label-with-help">Patch size
+                  <span class="tooltip" tabindex="0">?
+                    <span class="tooltip-box">The size of each image tile processed by the model. Bigger tiles can improve consistency but need more memory.</span>
+                  </span>
+                </span>
+                <input id="patchSize" type="number" min="16" step="16" value="128" />
+              </label>
+              <label class="field">
+                <span class="label-with-help">Stride
+                  <span class="tooltip" tabindex="0">?
+                    <span class="tooltip-box">How far the next tile moves. Smaller stride means more overlap and smoother joins, but slower processing.</span>
+                  </span>
+                </span>
+                <input id="stride" type="number" min="8" step="8" value="64" />
+              </label>
+            </div>
+
+            <div class="two-up">
+              <label class="field">
+                <span class="label-with-help">TTA
+                  <span class="tooltip" tabindex="0">?
+                    <span class="tooltip-box">Test-time augmentation. Higher values run extra flipped or rotated passes for better quality, but they take longer.</span>
+                  </span>
+                </span>
+                <input id="tta" type="number" min="1" max="16" step="1" value="1" />
+              </label>
+              <label class="field">
+                <span class="label-with-help">Batch size
+                  <span class="tooltip" tabindex="0">?
+                    <span class="tooltip-box">How many patches are inferenced together. Larger batches are usually faster on GPU but need more VRAM.</span>
+                  </span>
+                </span>
+                <input id="batchSize" type="number" min="1" step="1" value="32" />
+              </label>
+              <label class="field">
+                <span class="label-with-help">Device
+                  <span class="tooltip" tabindex="0">?
+                    <span class="tooltip-box">Leave on Auto for the default device. You can force `cpu` or a specific CUDA device if needed.</span>
+                  </span>
+                </span>
+                <input id="device" type="text" placeholder="Auto" />
+              </label>
+            </div>
+
+            <div class="two-up slider-row">
+              <label class="field range-field range-inline">
+                <span class="label-with-help">Strength
+                  <span class="tooltip" tabindex="0">?
+                <span id="strengthTooltipText" class="tooltip-box">Controls how strongly the result moves toward the denoised version. Lower keeps more original noise, higher smooths more.</span>
+                  </span>
+                </span>
+                <div class="slider-inline">
+                  <input id="strength" type="range" min="0" max="1.5" step="0.01" value="1" />
+                  <strong id="strengthValue">1.00</strong>
+                </div>
+              </label>
+
+              <label class="field range-field range-inline">
+                <span class="label-with-help">Detail preservation
+                  <span class="tooltip" tabindex="0">?
+                    <span class="tooltip-box">Blends some fine texture back from the original image. Raise it if the output looks too soft.</span>
+                  </span>
+                </span>
+                <div class="slider-inline">
+                  <input id="detailPreservation" type="range" min="0" max="1" step="0.01" value="0.2" />
+                  <strong id="detailValue">0.20</strong>
+                </div>
+              </label>
+            </div>
+
+            <div class="two-up slider-row">
+              <label class="field range-field range-inline">
+                <span class="label-with-help">Background threshold
+                  <span class="tooltip" tabindex="0">?
+                    <span class="tooltip-box">Dark pixels below this level are increasingly treated as background. Raise it if you want more of the black space cleaned aggressively.</span>
+                  </span>
+                </span>
+                <div class="slider-inline">
+                  <input id="backgroundThreshold" type="range" min="0" max="0.5" step="0.01" value="0.12" />
+                  <strong id="backgroundThresholdValue">0.12</strong>
+                </div>
+              </label>
+
+              <label class="field range-field range-inline">
+                <span class="label-with-help">Background strength
+                  <span class="tooltip" tabindex="0">?
+                    <span class="tooltip-box">Extra denoising applied only in dark background regions. Higher values smooth the black space more than the subject.</span>
+                  </span>
+                </span>
+                <div class="slider-inline">
+                  <input id="backgroundStrength" type="range" min="0" max="1.8" step="0.01" value="1.20" />
+                  <strong id="backgroundStrengthValue">1.20</strong>
+                </div>
+              </label>
+            </div>
+
+            <div class="two-up slider-row">
+              <label class="field range-field range-inline">
+                <span class="label-with-help">Subject detail
+                  <span class="tooltip" tabindex="0">?
+                    <span class="tooltip-box">Fine-detail preservation used on brighter subjects and structures. Raise it if stars or edges are getting too soft.</span>
+                  </span>
+                </span>
+                <div class="slider-inline">
+                  <input id="subjectDetailPreservation" type="range" min="0" max="1" step="0.01" value="0.20" />
+                  <strong id="subjectDetailValue">0.20</strong>
+                </div>
+              </label>
+
+              <label class="field range-field range-inline">
+                <span class="label-with-help">Background detail
+                  <span class="tooltip" tabindex="0">?
+                    <span class="tooltip-box">Fine-detail preservation used in the dark background. Lower values keep the black space cleaner and smoother.</span>
+                  </span>
+                </span>
+                <div class="slider-inline">
+                  <input id="backgroundDetailPreservation" type="range" min="0" max="1" step="0.01" value="0.05" />
+                  <strong id="backgroundDetailValue">0.05</strong>
+                </div>
+              </label>
+            </div>
+
+            <label class="toggle">
+              <input id="amp" type="checkbox" checked />
+              <span class="label-with-help">Use AMP on CUDA
+                <span class="tooltip" tabindex="0">?
+                  <span class="tooltip-box">Uses mixed precision on compatible GPUs to speed up denoising and reduce memory usage.</span>
+                </span>
+              </span>
+            </label>
+          </section>
+          </div>
+
+          <section class="action-bar">
+            <div class="preset-group" aria-label="Quick presets">
+              <span class="preset-group-label">Quick Presets</span>
+              <div class="preset-buttons">
+                <button class="button button-secondary quick-preset-btn" type="button" data-preset="fast">Fast</button>
+                <button class="button button-secondary quick-preset-btn" type="button" data-preset="balanced">Balanced</button>
+                <button class="button button-secondary quick-preset-btn" type="button" data-preset="galaxy">Galaxy</button>
+                <button class="button button-secondary quick-preset-btn" type="button" data-preset="globular-cluster">Globular Cluster</button>
+                <button class="button button-secondary quick-preset-btn" type="button" data-preset="deep-field">Deep Field</button>
+                <button class="button button-secondary quick-preset-btn" type="button" data-preset="nebulae">Nebulae</button>
+              </div>
+            </div>
+            <button id="runDenoise" class="button button-primary" type="button">Run</button>
+            <button id="cancelDenoise" class="button button-secondary button-danger" type="button" disabled>Cancel</button>
+            <button id="saveResult" class="button button-secondary" type="button" disabled>Save Result</button>
+          </section>
+
+          <section class="status-card">
+            <div id="progressMeta" class="progress-meta hidden" role="status" aria-live="polite" aria-atomic="true">
+              <span id="progressLabel">Ready</span>
+              <strong id="progressPercent">0%</strong>
+            </div>
+            <div id="progressBar" class="progress-bar hidden" aria-hidden="true"><span></span></div>
+            <p id="statusText">Choose a model and an image, then run denoising.</p>
+          </section>
+        </section>
+
+        <section class="preview card">
+          <div class="preview-head">
+            <h2>Preview</h2>
+          </div>
+
+          <div class="compare-canvas" id="compareCanvas">
+            <img id="originalPreview" class="compare-img" alt="" />
+            <div class="compare-clip" id="compareClip">
+              <img id="denoisedPreview" class="compare-img-clip" alt="Denoised preview" />
+            </div>
+            <div class="compare-divider" id="compareDivider">
+              <div class="compare-handle">
+                <svg width="18" height="18" viewBox="0 0 18 18" fill="none" xmlns="http://www.w3.org/2000/svg">
+                  <path d="M6 4L2 9l4 5M12 4l4 5-4 5" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+                </svg>
+              </div>
+            </div>
+            <div class="compare-label compare-label-left">Original</div>
+            <div id="resultLabel" class="compare-label compare-label-right">Denoised</div>
+            <div id="originalEmpty" class="preview-empty">Load an image to populate the preview.</div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script src="./renderer.js"></script>
+  </body>
+</html>

@@ -1,0 +1,86 @@
+{
+  "name": "deepskydenoiser",
+  "version": "1.0.0",
+  "description": "Deep sky image denoising desktop app",
+  "main": "electron/main.js",
+  "private": true,
+  "scripts": {
+    "start": "electron .",
+    "build": "electron-builder"
+  },
+  "devDependencies": {
+    "electron": "36.9.5",
+    "electron-builder": "26.8.1"
+  },
+  "build": {
+    "appId": "com.deepskydenoiser.app",
+    "productName": "DeepSkyDenoiser",
+    "asar": true,
+    "directories": {
+      "output": "dist",
+      "buildResources": "build"
+    },
+    "files": [
+      "electron/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "desktop_bridge.py",
+        "to": "backend/desktop_bridge.py"
+      },
+      {
+        "from": "noise",
+        "to": "backend/noise",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
+      },
+      {
+        "from": "gradient",
+        "to": "backend/gradient",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc"
+        ]
+      },
+      {
+        "from": "models",
+        "to": "models",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": ".venv311",
+        "to": ".venv311",
+        "filter": [
+          "**/*",
+          "!**/__pycache__/**",
+          "!**/*.pyc",
+          "!**/pip*/**",
+          "!**/setuptools*/**",
+          "!**/wheel*/**"
+        ]
+      }
+    ],
+    "win": {
+      "target": [
+        "dir"
+      ],
+      "signAndEditExecutable": false
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-portable.${ext}"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}-${version}-setup.${ext}"
+    }
+  }
+}
