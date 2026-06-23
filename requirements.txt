@@ -1,4 +1,4 @@
-numpy==2.4.6
+numpy<2  # match notebook's preinstalled torch build (numpy 2.x crashes torch compiled against 1.x)
 pillow==12.2.0
 tifffile==2026.3.3
 tqdm==4.67.3

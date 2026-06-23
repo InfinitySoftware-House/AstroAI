@@ -1908,7 +1908,11 @@ def train(args: argparse.Namespace) -> None:
         )
     else:
         scheduler = cosine_scheduler
-    scaler = torch.amp.GradScaler("cuda", enabled=(args.amp and device.type == "cuda"))
+    scaler_enabled = args.amp and device.type == "cuda"
+    if hasattr(torch.amp, "GradScaler"):
+        scaler = torch.amp.GradScaler("cuda", enabled=scaler_enabled)
+    else:
+        scaler = torch.cuda.amp.GradScaler(enabled=scaler_enabled)
 
     best_val = float("inf")
     best_psnr = float("-inf")
